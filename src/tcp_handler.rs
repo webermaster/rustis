@@ -19,7 +19,6 @@ pub fn handle_client(stream: TcpStream) -> () {
         println!("{:?}", msg);
         let mut writer = Writer::new(&stream);
         _ = writer.write(Message::String("OK".to_string()));
-        // _ = resp.write(b"+OK\r\n");
      }
 }
 
