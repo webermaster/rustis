@@ -1,66 +1,14 @@
 use std::io::{Error, ErrorKind, Read, Result, Write};
 
-#[derive(Debug)]
-pub enum Message {
-    String(String),
-    Error(String),
-    Integer(u64),
-    Bulk(String),
-    Array(Vec<Message>),
-    Null
-}
-
- impl Message {
-    fn marshal(&self) -> Vec<u8> {
-        match self {
-            array @ Message::Array(_) => array.marshal_array(),
-            bulk @ Message::Bulk(_) => bulk.marshal_bulk(),
-            string @ Message::String(_) => string.marshal_string(),
-            error @ Message::Error(_) => error.marshal_error(),
-            null @ Message::Null => null.marshal_null(),
-            _ => Vec::new()
-        }
-    }
-
-    fn marshal_array(&self) -> Vec<u8> {
-        todo!()
-    }
-
-    fn marshal_bulk(&self) -> Vec<u8> {
-        todo!()
-    }
-
-    fn marshal_string(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
-        bytes.push(b'+');
-        if let Message::String(string) = self {
-            bytes.append(&mut string.clone().into_bytes());
-        }
-        // TODO you were here
-        bytes
-    }
-
-    fn marshal_error(&self) -> Vec<u8> {
-        todo!()
-    }
-
-    fn marshal_null(&self) -> Vec<u8> {
-        todo!()
-    }
-
-}
+use crate::message::Message;
 
 pub struct Resp<R> {
-    read_writer: R
+    read: R
 }
 
 impl <R: Read + Write> Resp<R> {
-    pub fn new(read_writer: R) -> Resp<R> {
-        Resp{read_writer}
-    }
-
-    pub fn write(&mut self, bytes:  &[u8]) -> Result<usize> {
-         self.read_writer.write(bytes)
+    pub fn new(read: R) -> Resp<R> {
+        Resp{read}
     }
 
     pub fn read(&mut self) -> Result<Message> {
@@ -83,7 +31,7 @@ impl <R: Read + Write> Resp<R> {
     fn read_byte(&mut self) -> Result<u8> {
         let mut buf = [0u8; 1];
 
-        match self.read_writer.read(&mut buf) {
+        match self.read.read(&mut buf) {
             Ok(0) => Err(Error::new(ErrorKind::InvalidInput, "no bytes")),
             Ok(_) => {
                 Ok(buf[0])
@@ -111,10 +59,10 @@ impl <R: Read + Write> Resp<R> {
         let array_length = r?;
         let mut bulk = vec![0u8; array_length];
 
-        let _ = self.read_writer.read(&mut bulk);
+        let _ = self.read.read(&mut bulk);
         let _ = self.read_line(&mut vec![0; 2]); // eat trailing CLRF
         let bulk_string = String::from_utf8_lossy(&bulk).to_string();
-        Ok(Message::String(bulk_string))
+        Ok(Message::Bulk(bulk_string))
     }
 
     fn read_integer(&mut self) -> (usize, Result<usize>) {
