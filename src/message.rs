@@ -1,15 +1,15 @@
 
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Message {
     String(String),
     Error(String),
     Number(u64),
     Bulk(String),
     Array(Vec<Message>),
-    Null
+    Null,
 }
 
- impl Message {
+impl Message {
     pub fn marshal(&self) -> Vec<u8> {
         match self {
             array @ Message::Array(_) => array.marshal_array(),
@@ -17,7 +17,7 @@ pub enum Message {
             string @ Message::String(_) => string.marshal_string(),
             error @ Message::Error(_) => error.marshal_error(),
             null @ Message::Null => null.marshal_null(),
-            _ => Vec::new()
+            _ => Vec::new(),
         }
     }
 
@@ -26,10 +26,10 @@ pub enum Message {
         bytes.push(b'*');
         if let Message::Array(array) = self {
             let l = array.len();
-            bytes.append(&mut vec![l as u8]);
-            bytes.append(&mut vec![b'\r', b'\n']);
+            bytes.extend_from_slice(l.to_string().as_bytes());
+            bytes.extend_from_slice(b"\r\n");
             for item in array {
-                bytes.append(&mut item.marshal());
+                bytes.extend(item.marshal());
             }
         }
         bytes
@@ -39,11 +39,11 @@ pub enum Message {
         let mut bytes = Vec::new();
         bytes.push(b'$');
         if let Message::Bulk(string) = self {
-            bytes.append(&mut vec![string.len() as u8]);
-            bytes.append(&mut vec![b'\r', b'\n']);
-            bytes.append(&mut string.clone().into_bytes());
+            bytes.extend_from_slice(string.len().to_string().as_bytes());
+            bytes.extend_from_slice(b"\r\n");
+            bytes.extend_from_slice(string.as_bytes());
         }
-        bytes.append(&mut vec![b'\r', b'\n']);
+        bytes.extend_from_slice(b"\r\n");
         bytes
     }
 
@@ -51,9 +51,9 @@ pub enum Message {
         let mut bytes = Vec::new();
         bytes.push(b'+');
         if let Message::String(string) = self {
-            bytes.append(&mut string.clone().into_bytes());
+            bytes.extend_from_slice(string.as_bytes());
         }
-        bytes.append(&mut vec![b'\r', b'\n']);
+        bytes.extend_from_slice(b"\r\n");
         bytes
     }
 
@@ -61,14 +61,52 @@ pub enum Message {
         let mut bytes = Vec::new();
         bytes.push(b'-');
         if let Message::Error(error) = self {
-            bytes.append(&mut error.clone().into_bytes());
+            bytes.extend_from_slice(error.as_bytes());
         }
-        bytes.append(&mut vec![b'\r', b'\n']);
+        bytes.extend_from_slice(b"\r\n");
         bytes
     }
 
     fn marshal_null(&self) -> Vec<u8> {
         b"$-1\r\n".to_vec()
     }
-
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_marshal_string() {
+        let msg = Message::String("OK".to_string());
+        assert_eq!(msg.marshal(), b"+OK\r\n");
+    }
+
+    #[test]
+    fn test_marshal_error() {
+        let msg = Message::Error("ERR something went wrong".to_string());
+        assert_eq!(msg.marshal(), b"-ERR something went wrong\r\n");
+    }
+
+    #[test]
+    fn test_marshal_bulk() {
+        let msg = Message::Bulk("foobar".to_string());
+        assert_eq!(msg.marshal(), b"$6\r\nfoobar\r\n");
+    }
+
+    #[test]
+    fn test_marshal_null() {
+        let msg = Message::Null;
+        assert_eq!(msg.marshal(), b"$-1\r\n");
+    }
+
+    #[test]
+    fn test_marshal_array() {
+        let msg = Message::Array(vec![
+            Message::Bulk("foo".to_string()),
+            Message::Bulk("bar".to_string()),
+        ]);
+        assert_eq!(msg.marshal(), b"*2\r\n$3\r\nfoo\r\n$3\r\nbar\r\n");
+    }
+}
+
