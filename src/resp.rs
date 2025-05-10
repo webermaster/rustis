@@ -3,12 +3,12 @@ use std::io::{Error, ErrorKind, Read, Result, Write};
 use crate::message::Message;
 
 pub struct Resp<R> {
-    read: R
+    rw: R
 }
 
 impl <R: Read + Write> Resp<R> {
-    pub fn new(read: R) -> Resp<R> {
-        Resp{read}
+    pub fn new(rw: R) -> Resp<R> {
+        Resp{rw}
     }
 
     pub fn read(&mut self) -> Result<Message> {
@@ -28,10 +28,15 @@ impl <R: Read + Write> Resp<R> {
         }
     }
 
+    pub fn write(&mut self, message: Message) -> Result<usize> {
+        let bytes = message.marshal();
+        self.rw.write(&bytes)
+    }
+
     fn read_byte(&mut self) -> Result<u8> {
         let mut buf = [0u8; 1];
 
-        match self.read.read(&mut buf) {
+        match self.rw.read(&mut buf) {
             Ok(0) => Err(Error::new(ErrorKind::InvalidInput, "no bytes")),
             Ok(_) => {
                 Ok(buf[0])
@@ -59,7 +64,7 @@ impl <R: Read + Write> Resp<R> {
         let array_length = r?;
         let mut bulk = vec![0u8; array_length];
 
-        let _ = self.read.read(&mut bulk);
+        let _ = self.rw.read(&mut bulk);
         let _ = self.read_line(&mut vec![0; 2]); // eat trailing CLRF
         let bulk_string = String::from_utf8_lossy(&bulk).to_string();
         Ok(Message::Bulk(bulk_string))
@@ -89,3 +94,70 @@ impl <R: Read + Write> Resp<R> {
         Ok(n)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+    use crate::message::Message;
+
+    use super::*;
+
+    #[test]
+    fn test_write_bulk_message() {
+        let msg = Message::Bulk("hello".into());
+        let mut buffer = Cursor::new(Vec::new());
+        let mut resp = Resp::new(&mut buffer);
+
+        let bytes_written = resp.write(msg).unwrap();
+        assert!(bytes_written > 0);
+
+        let result = buffer.get_ref();
+        assert_eq!(result, b"$5\r\nhello\r\n"); // Adjust if marshal differs
+    }
+
+    #[test]
+    fn test_read_bulk_message() {
+        let input = b"$5\r\nhello\r\n";
+        let cursor = Cursor::new(input.to_vec());
+        let mut resp = Resp::new(cursor);
+
+        let message = resp.read().unwrap();
+        assert_eq!(message, Message::Bulk("hello".into()));
+    }
+
+    #[test]
+    fn test_read_array_message() {
+        let input = b"*2\r\n$3\r\nfoo\r\n$3\r\nbar\r\n";
+        let cursor = Cursor::new(input.to_vec());
+        let mut resp = Resp::new(cursor);
+
+        let message = resp.read().unwrap();
+        assert_eq!(
+            message,
+            Message::Array(vec![
+                Message::Bulk("foo".into()),
+                Message::Bulk("bar".into())
+            ])
+        );
+    }
+
+    #[test]
+    fn test_read_unknown_type() {
+        let input = b"!\r\n";
+        let cursor = Cursor::new(input.to_vec());
+        let mut resp = Resp::new(cursor);
+
+        let message = resp.read().unwrap();
+        assert_eq!(message, Message::Null);
+    }
+
+    #[test]
+    fn test_read_byte_empty() {
+        let cursor = Cursor::new(Vec::new());
+        let mut resp = Resp::new(cursor);
+        let result = resp.read_byte();
+        assert!(result.is_err());
+    }
+}
+

@@ -1,7 +1,6 @@
 use std::net::TcpListener;
 
 mod message;
-mod writer;
 mod resp;
 mod handlers;
 mod tcp_handler;

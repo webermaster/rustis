@@ -2,12 +2,10 @@ use std::net::TcpStream;
 use crate::handlers::init_handler_funcs;
 use crate::message::Message;
 use crate::resp::Resp;
-use crate::writer::Writer;
 
 pub fn handle_client(stream: TcpStream) -> () {
     let handlers = init_handler_funcs();
     let mut resp = Resp::new(&stream);
-    let mut writer = Writer::new(&stream);
     loop {
         let read = resp.read();
         let msg = match read {
@@ -31,13 +29,13 @@ pub fn handle_client(stream: TcpStream) -> () {
                     Some(f) => f,
                     None => {
                         println!("Invalid command: {}", cmd);
-                        _ = writer.write(Message::String("".to_string()));
+                        _ = resp.write(Message::String("".to_string()));
                         continue;
                     }
                 };
 
                 let result_msg = handler(args.to_vec());
-                _ = writer.write(result_msg);
+                _ = resp.write(result_msg);
             }
         } else {
             println!("Invalid request, expected array");
