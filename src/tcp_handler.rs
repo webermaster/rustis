@@ -1,11 +1,12 @@
-use std::net::TcpStream;
+use std::io::{ Read, Write };
+
 use crate::handlers::init_handler_funcs;
 use crate::message::Message;
 use crate::resp::Resp;
 
-pub fn handle_client(stream: TcpStream) -> () {
+pub fn handle_client<R: Read + Write>(stream: R) -> () {
     let handlers = init_handler_funcs();
-    let mut resp = Resp::new(&stream);
+    let mut resp = Resp::new(stream);
     loop {
         let read = resp.read();
         let msg = match read {
@@ -44,132 +45,91 @@ pub fn handle_client(stream: TcpStream) -> () {
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*; // Bring the parent module's items into the test module
-//     use std::sync::{Arc, Mutex};
-//     use std::collections::HashMap;
-//
-//     // Mock Resp
-//     #[derive(Clone)]
-//     pub struct MockResp {
-//         pub responses: Arc<Mutex<Vec<Message>>>,
-//     }
-//
-//     impl MockResp {
-//         pub fn new() -> Self {
-//             MockResp {
-//                 responses: Arc::new(Mutex::new(Vec::new())),
-//             }
-//         }
-//
-//         // pub fn read(&self) -> Result<Message, String> {
-//         //     let mut responses = self.responses.lock().unwrap();
-//         //     if let Some(response) = responses.pop() {
-//         //         Ok(response)
-//         //     } else {
-//         //         Err("No more responses".to_string())
-//         //     }
-//         // }
-//     }
-//
-//     // Mock Writer
-//     pub struct MockWriter {
-//         pub written: Arc<Mutex<Vec<u8>>>,
-//     }
-//
-//     impl MockWriter {
-//         pub fn new() -> Self {
-//             MockWriter {
-//                 written: Arc::new(Mutex::new(Vec::new())),
-//             }
-//         }
-//
-//         // pub fn write(&mut self, message: Message) -> Result<(), io::Error> {
-//         //     let mut written = self.written.lock().unwrap();
-//         //     written.extend_from_slice(&message.marshal());
-//         //     Ok(())
-//         // }
-//     }
-//
-//     // Fake handler function
-//     fn mock_handler(_args: Vec<Message>) -> Message {
-//         Message::String("OK".to_string())
-//     }
-//
-//     #[test]
-//     fn test_handle_client_valid_command() {
-//         // Mock the handler functions
-//         let mut handlers: HashMap<String, Box<dyn Fn(Vec<Message>) -> Message>> = HashMap::new();
-//         handlers.insert("PING".to_string(), Box::new(mock_handler));
-//
-//         // Create mock resp and writer
-//         let resp = MockResp::new();
-//         let writer = MockWriter::new();
-//
-//         // Simulate valid message array
-//         let array = vec![
-//             Message::Bulk("PING".to_string()),
-//             Message::String("".to_string()), // Just an empty string argument
-//         ];
-//
-//         // Mock reading the array message from the client
-//         resp.responses.lock().unwrap().push(Message::Array(array));
-//
-//         // Run the handle_client function
-//         let stream = TcpStream::connect("localhost:8080").unwrap();
-//         handle_client(stream);
-//
-//         // Assert that the correct message was written
-//         let written_data = writer.written.lock().unwrap();
-//         assert_eq!(written_data.as_slice(), b"+OK\r\n");
-//     }
-//
-//     #[test]
-//     fn test_handle_client_invalid_command() {
-//
-//         // Create mock resp and writer
-//         let resp = MockResp::new();
-//         let writer = MockWriter::new();
-//
-//         // Simulate invalid command message array
-//         let array = vec![
-//             Message::Bulk("UNKNOWN".to_string()),
-//             Message::String("".to_string()),
-//         ];
-//
-//         // Mock reading the array message from the client
-//         resp.responses.lock().unwrap().push(Message::Array(array));
-//
-//         // Run the handle_client function
-//         let stream = TcpStream::connect("localhost:8080").unwrap();
-//         handle_client(stream);
-//
-//         // Assert that an empty response was written (since the command was invalid)
-//         let written_data = writer.written.lock().unwrap();
-//         assert_eq!(written_data.as_slice(), b"");
-//     }
-//
-//     #[test]
-//     fn test_handle_client_error_reading() {
-//         // Mock the handler functions
-//         let mut handlers: HashMap<String, Box<dyn Fn(Vec<Message>) -> Message>> = HashMap::new();
-//         handlers.insert("PING".to_string(), Box::new(mock_handler));
-//
-//         // Create mock resp that will return an error on read
-//         let resp = MockResp::new();
-//         let writer = MockWriter::new();
-//
-//         // Simulate error while reading
-//         resp.responses.lock().unwrap().push(Message::String("error".to_string()));
-//
-//         // Simulate an error scenario where read() fails
-//         let stream = TcpStream::connect("localhost:8080").unwrap();
-//         handle_client(stream);
-//
-//         // Ensure no data was written (because the read failed)
-//         let written_data = writer.written.lock().unwrap();
-//         assert_eq!(written_data.len(), 0);
-//     }
-// }
-//
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{self, Read, Write};
+
+    /// A mock stream to simulate client-server communication.
+    pub struct MockStream {
+        pub read_data: Vec<u8>,
+        pub write_data: Vec<u8>,
+        pub position: usize,
+    }
+
+    impl MockStream {
+        /// Creates a new MockStream with the given input data.
+        pub fn new(read_data: Vec<u8>) -> Self {
+            Self {
+                read_data,
+                write_data: Vec::new(),
+                position: 0,
+            }
+        }
+    }
+
+    impl Read for MockStream {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            if self.position >= self.read_data.len() {
+                return Ok(0); // Simulate EOF
+            }
+            let bytes_to_read = std::cmp::min(buf.len(), self.read_data.len() - self.position);
+            buf[..bytes_to_read]
+                .copy_from_slice(&self.read_data[self.position..self.position + bytes_to_read]);
+            self.position += bytes_to_read;
+            Ok(bytes_to_read)
+        }
+    }
+
+    impl Write for MockStream {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.write_data.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn test_handle_client_ping() {
+        // Simulate a PING command: *1\r\n$4\r\nPING\r\n
+        let input = b"*1\r\n$4\r\nPING\r\n".to_vec();
+        let mut mock_stream = MockStream::new(input);
+
+        handle_client(&mut mock_stream);
+
+        // The expected response is: +PONG\r\n
+        let expected_output = b"+PONG\r\n";
+        assert_eq!(&mock_stream.write_data, expected_output);
+    }
+
+    #[test]
+    fn test_handle_client_invalid_command() {
+        // Simulate an invalid command: *1\r\n$7\r\nUNKNOWN\r\n
+        let input = b"*1\r\n$7\r\nUNKNOWN\r\n".to_vec();
+        let mut mock_stream = MockStream::new(input);
+
+        handle_client(&mut mock_stream);
+
+        // The expected response is an empty string: +\r\n
+        let expected_output = b"+\r\n";
+        assert_eq!(&mock_stream.write_data, expected_output);
+    }
+
+    #[test]
+    fn test_handle_client_malformed_message() {
+        // Simulate a malformed message: $5\r\nhello\r\n
+        let input = b"$5\r\nhello\r\n".to_vec();
+        let mut mock_stream = MockStream::new(input);
+
+        handle_client(&mut mock_stream);
+
+        // The expected response is an empty string: +\r\n
+        let expected_output = b"+\r\n";
+        assert_eq!(&mock_stream.write_data, expected_output);
+    }
+}
+

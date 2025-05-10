@@ -101,8 +101,6 @@ mod tests {
     use std::io::Cursor;
     use crate::message::Message;
 
-    use super::*;
-
     #[test]
     fn test_write_bulk_message() {
         let msg = Message::Bulk("hello".into());
