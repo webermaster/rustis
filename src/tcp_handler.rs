@@ -39,7 +39,7 @@ pub fn handle_client<R: Read + Write>(stream: R) -> () {
                 _ = resp.write(result_msg);
             }
         } else {
-            println!("Invalid request, expected array");
+            _ = resp.write(Message::Error("Protocol error: expected '*'".to_string()));
             continue;
         }
     }
@@ -120,7 +120,7 @@ mod tests {
     }
 
     #[test]
-    fn test_handle_client_malformed_message() {
+    fn test_handle_client_non_array_message() {
         // Simulate a malformed message: $5\r\nhello\r\n
         let input = b"$5\r\nhello\r\n".to_vec();
         let mut mock_stream = MockStream::new(input);
@@ -128,7 +128,7 @@ mod tests {
         handle_client(&mut mock_stream);
 
         // The expected response is an empty string: +\r\n
-        let expected_output = b"+\r\n";
+        let expected_output = b"-Protocol error: expected '*'\r\n";
         assert_eq!(&mock_stream.write_data, expected_output);
     }
 }
