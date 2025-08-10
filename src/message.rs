@@ -4,7 +4,7 @@ pub enum Message {
     String(String),
     Error(String),
     Number(u64),
-    Bulk(String),
+    Bulk(Vec<u8>),
     Array(Vec<Message>),
     Null,
 }
@@ -41,7 +41,7 @@ impl Message {
         if let Message::Bulk(string) = self {
             bytes.extend_from_slice(string.len().to_string().as_bytes());
             bytes.extend_from_slice(b"\r\n");
-            bytes.extend_from_slice(string.as_bytes());
+            bytes.extend_from_slice(string);
         }
         bytes.extend_from_slice(b"\r\n");
         bytes
@@ -90,7 +90,7 @@ mod tests {
 
     #[test]
     fn test_marshal_bulk() {
-        let msg = Message::Bulk("foobar".to_string());
+        let msg = Message::Bulk(b"foobar".to_vec());
         assert_eq!(msg.marshal(), b"$6\r\nfoobar\r\n");
     }
 
@@ -103,8 +103,8 @@ mod tests {
     #[test]
     fn test_marshal_array() {
         let msg = Message::Array(vec![
-            Message::Bulk("foo".to_string()),
-            Message::Bulk("bar".to_string()),
+            Message::Bulk(b"foo".to_vec()),
+            Message::Bulk(b"bar".to_vec()),
         ]);
         assert_eq!(msg.marshal(), b"*2\r\n$3\r\nfoo\r\n$3\r\nbar\r\n");
     }

@@ -23,20 +23,25 @@ pub fn handle_client<R: Read + Write>(stream: R) -> () {
                 continue;
             }
             if let Message::Bulk(command) = &array[0] {
-                let cmd = command.to_uppercase();
-                let args = &array[1..];
+                if let Ok(cmd_str) = std::str::from_utf8(command) {
+                    let cmd = cmd_str.to_uppercase();
+                    let args = &array[1..];
 
-                let handler = match handlers.get(cmd.as_str()) {
-                    Some(f) => f,
-                    None => {
-                        println!("Invalid command: {}", cmd);
-                        _ = resp.write(Message::String("".to_string()));
-                        continue;
+                    match handlers.get(cmd.as_str()) {
+                        Some(f) => {
+                            let result_msg = f(args.to_vec());
+                            _ = resp.write(result_msg);
+                        },
+                        None => {
+                            println!("Invalid command: {}", cmd_str);
+                            _ = resp.write(Message::String("".to_string()));
+                            continue;
+                        }
                     }
-                };
-
-                let result_msg = handler(args.to_vec());
-                _ = resp.write(result_msg);
+                } else {
+                    _ = resp.write(Message::Error("Commands must be valid UTF-8".to_string()));
+                    continue;
+                }
             }
         } else {
             _ = resp.write(Message::Error("Protocol error: expected '*'".to_string()));
@@ -129,6 +134,19 @@ mod tests {
 
         // The expected response is an empty string: +\r\n
         let expected_output = b"-Protocol error: expected '*'\r\n";
+        assert_eq!(&mock_stream.write_data, expected_output);
+    }
+
+    #[test]
+    fn test_handle_invalid_utf_8_command() {
+        // Simulate a malformed message: $5\r\nhello\r\n
+        let input = b"*1\r\n$1\r\n\xFF\r\n".to_vec();
+        let mut mock_stream = MockStream::new(input);
+
+        handle_client(&mut mock_stream);
+
+        // The expected response is an empty string: +\r\n
+        let expected_output = b"-Commands must be valid UTF-8\r\n";
         assert_eq!(&mock_stream.write_data, expected_output);
     }
 }

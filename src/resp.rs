@@ -66,8 +66,7 @@ impl <R: Read + Write> Resp<R> {
 
         let _ = self.rw.read(&mut bulk);
         let _ = self.read_line(&mut vec![0; 2]); // eat trailing CLRF
-        let bulk_string = String::from_utf8_lossy(&bulk).to_string();
-        Ok(Message::Bulk(bulk_string))
+        Ok(Message::Bulk(bulk))
     }
 
     fn read_integer(&mut self) -> (usize, Result<usize>) {

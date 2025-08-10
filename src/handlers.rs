@@ -13,7 +13,7 @@ pub fn init_handler_funcs() -> HashMap<&'static str, HandlerFunc> {
 pub fn ping(args: Vec<Message>) -> Message {
     match args.as_slice() {
         [] => Message::String("PONG".to_string()),
-        [Message::Bulk(arg), _rest @ ..] => Message::String(arg.to_string()),
+        [Message::Bulk(arg), _rest @ ..] => Message::String(String::from_utf8(arg.clone()).expect("Invalid UTF-8")),
         _ => Message::Error("Protocol error: expected Bulk string".to_string())
     }
 }
@@ -41,9 +41,9 @@ mod tests {
 
     #[test]
     fn test_ping_handler_with_args() {
-        let pong = "foo".to_string();
+        let pong = b"foo".to_vec();
         let result = ping(vec![Message::Bulk(pong.clone())]);
-        assert_eq!(result, Message::String(pong));
+        assert_eq!(result, Message::String(String::from_utf8(pong).expect("Invalid UTF-8")));
     }
 }
 
