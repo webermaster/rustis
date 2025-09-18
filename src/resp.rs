@@ -1,6 +1,7 @@
 use std::io::{Error, ErrorKind, Read, Result, Write};
 
 use crate::message::Message;
+use crate::message::Message::*;
 
 pub struct Resp<R> {
     rw: R
@@ -20,7 +21,7 @@ impl <R: Read + Write> Resp<R> {
                     b'$' => self.read_bulk(),
                     t => {
                         println!("Unknown type: {}", String::from_utf8_lossy(&[t]));
-                        Ok(Message::Null)
+                        Ok(Null)
                     }
                 }
             },
@@ -52,11 +53,11 @@ impl <R: Read + Write> Resp<R> {
         for _ in 0..array_length {
             let val = match self.read() {
                 Ok(msg) => msg,
-                Err(error) => Message::Error(error.to_string())
+                Err(error) => Message::error(error.to_string())
             };
             array.push(val);
         }
-        Ok(Message::Array(array))
+        Ok(Message::array(array))
     }
 
     fn read_bulk(&mut self) -> Result<Message> {
@@ -66,7 +67,7 @@ impl <R: Read + Write> Resp<R> {
 
         let _ = self.rw.read(&mut bulk);
         let _ = self.read_line(&mut vec![0; 2]); // eat trailing CLRF
-        Ok(Message::Bulk(bulk))
+        Ok(Message::bulk(bulk))
     }
 
     fn read_integer(&mut self) -> (usize, Result<usize>) {
@@ -75,8 +76,13 @@ impl <R: Read + Write> Resp<R> {
             Ok(n) => n,
             Err(err) => return (0, Err(err))
         };
-        let i = (buf[0] - b'0') as usize;
-        (n, Ok(i))
+        let result = String::from_utf8(buf)
+            .map_err(|_| Error::new(ErrorKind::InvalidData, "invalid UTF-8 in integer"))
+            .and_then(|s| s.parse::<usize>()
+                .map_err(|_| Error::new(ErrorKind::InvalidData, "invalid integer"))
+            );
+
+        (n, result)
     }
 
     fn read_line(&mut self, buf: &mut Vec<u8>) -> Result<usize> {
@@ -98,11 +104,10 @@ impl <R: Read + Write> Resp<R> {
 mod tests {
     use super::*;
     use std::io::Cursor;
-    use crate::message::Message;
 
     #[test]
     fn test_write_bulk_message() {
-        let msg = Message::Bulk("hello".into());
+        let msg = Message::bulk("hello".into());
         let mut buffer = Cursor::new(Vec::new());
         let mut resp = Resp::new(&mut buffer);
 
@@ -120,7 +125,7 @@ mod tests {
         let mut resp = Resp::new(cursor);
 
         let message = resp.read().unwrap();
-        assert_eq!(message, Message::Bulk("hello".into()));
+        assert_eq!(message, Message::bulk("hello".into()));
     }
 
     #[test]
@@ -132,9 +137,9 @@ mod tests {
         let message = resp.read().unwrap();
         assert_eq!(
             message,
-            Message::Array(vec![
-                Message::Bulk("foo".into()),
-                Message::Bulk("bar".into())
+            Message::array(vec![
+                Message::bulk("foo".into()),
+                Message::bulk("bar".into())
             ])
         );
     }
@@ -146,7 +151,7 @@ mod tests {
         let mut resp = Resp::new(cursor);
 
         let message = resp.read().unwrap();
-        assert_eq!(message, Message::Null);
+        assert_eq!(message, Null);
     }
 
     #[test]

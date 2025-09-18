@@ -1,11 +1,11 @@
 use std::io::{ Read, Write };
 
-use crate::handlers::init_handler_funcs;
+use crate::handlers::HANDLERS;
+use crate::message::Message::*;
 use crate::message::Message;
 use crate::resp::Resp;
 
-pub fn handle_client<R: Read + Write>(stream: R) -> () {
-    let handlers = init_handler_funcs();
+pub fn handle_client<R: Read + Write>(stream: R) {
     let mut resp = Resp::new(stream);
     loop {
         let read = resp.read();
@@ -17,34 +17,33 @@ pub fn handle_client<R: Read + Write>(stream: R) -> () {
             }
         };
 
-        if let Message::Array(array) = &msg {
-            if array.len() == 0 {
+        if let Array(array) = &msg {
+            if array.is_empty() {
                 println!("Invalid request, expected array length > 0");
                 continue;
             }
-            if let Message::Bulk(command) = &array[0] {
+            if let Bulk(command) = &array[0] {
                 if let Ok(cmd_str) = std::str::from_utf8(command) {
                     let cmd = cmd_str.to_uppercase();
                     let args = &array[1..];
 
-                    match handlers.get(cmd.as_str()) {
+                    match HANDLERS.get(cmd.as_str()) {
                         Some(f) => {
                             let result_msg = f(args.to_vec());
                             _ = resp.write(result_msg);
                         },
                         None => {
-                            println!("Invalid command: {}", cmd_str);
-                            _ = resp.write(Message::String("".to_string()));
+                            _ = resp.write(Message::simple(""));
                             continue;
                         }
                     }
                 } else {
-                    _ = resp.write(Message::Error("Commands must be valid UTF-8".to_string()));
+                    _ = resp.write(Message::error("Commands must be valid UTF-8"));
                     continue;
                 }
             }
         } else {
-            _ = resp.write(Message::Error("Protocol error: expected '*'".to_string()));
+            _ = resp.write(Message::error("Protocol error: expected '*'"));
             continue;
         }
     }
