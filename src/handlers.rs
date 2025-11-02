@@ -4,16 +4,23 @@ use std::sync::{LazyLock, Mutex};
 use crate::message::Message;
 use crate::message::Message::*;
 
-type HandlerFunc = fn(Vec<Message>) -> Message;
+type SetMap = Mutex<HashMap<Vec<u8>, Vec<u8>>>;
+type HandlerFunc = fn(Vec<Message>, &SetMap) -> Message;
+type HandlerMap = LazyLock<HashMap<&'static str, HandlerFunc>>;
 
-pub static HANDLERS: LazyLock<HashMap<&'static str, HandlerFunc>> = LazyLock::new(|| {
+pub static HANDLERS: HandlerMap = LazyLock::new(|| {
     let mut m: HashMap<&'static str, HandlerFunc> = HashMap::new();
+    m.insert("GET", get);
     m.insert("PING", ping);
     m.insert("SET", set);
     m
 });
 
-pub fn ping(args: Vec<Message>) -> Message {
+pub static SETS: LazyLock<SetMap> = LazyLock::new(|| {
+    Mutex::new(HashMap::new())
+});
+
+pub fn ping(args: Vec<Message>, _sets: &SetMap) -> Message {
     match args.as_slice() {
         [] => Message::simple("PONG"),
         [Bulk(arg), _rest @ ..] => Message::simple(str::from_utf8(arg).expect("Invalid UTF-8")),
@@ -21,14 +28,10 @@ pub fn ping(args: Vec<Message>) -> Message {
     }
 }
 
-static SETS: LazyLock<Mutex<HashMap<Vec<u8>, Vec<u8>>>> = LazyLock::new(|| {
-    Mutex::new(HashMap::new())
-});
-
-pub fn set(args: Vec<Message>) -> Message {
+pub fn set(args: Vec<Message>, sets: &SetMap) -> Message {
     match args.as_slice() {
         [Bulk(key), Bulk(value)] => {
-           let mut sets = SETS.lock().unwrap();
+           let mut sets = sets.lock().unwrap();
             sets.insert(key.to_vec(), value.to_vec());
             Message::simple("OK")
         },
@@ -36,23 +39,22 @@ pub fn set(args: Vec<Message>) -> Message {
     }
 }
 
-// func get(args []Value) Value {
-// 	if len(args) != 1 {
-// 		return Value{typ: "error", str: "ERR wrong number of arguments for 'get' command"}
-// 	}
-//
-// 	key := args[0].bulk
-//
-// 	SETsMu.RLock()
-// 	value, ok := SETs[key]
-// 	SETsMu.RUnlock()
-//
-// 	if !ok {
-// 		return Value{typ: "null"}
-// 	}
-//
-// 	return Value{typ: "bulk", bulk: value}
-// }
+pub fn get(args: Vec<Message>, sets: &SetMap) -> Message {
+    match args.as_slice() {
+        [Bulk(key)] => {
+            let sets = sets.lock().unwrap();
+            match sets.get(&key.to_vec()) {
+                Some(value) => {
+                    Message::bulk(value.to_vec())
+                },
+                _ => {
+                    Message::Null
+                }
+            }
+        },
+        _ => Message::error("ERR wrong number of arguments for 'get' command")
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -60,30 +62,35 @@ mod tests {
 
     #[test]
     fn test_init_handler_funcs_contains_ping() {
-        assert!(HANDLERS.contains_key("PING"));
+        assert!((*HANDLERS).contains_key("PING"));
     }
 
     #[test]
     fn test_init_handler_funcs_contains_set() {
-        assert!(HANDLERS.contains_key("SET"));
+        assert!((*HANDLERS).contains_key("SET"));
+    }
+
+    #[test]
+    fn test_init_handler_funcs_contains_get() {
+        assert!((*HANDLERS).contains_key("GET"));
     }
 
     #[test]
     fn test_ping() {
-        let result = ping(vec![]);
+        let result = ping(vec![], &Mutex::new(HashMap::new()));
         assert_eq!(result, Message::simple("PONG"));
     }
 
     #[test]
     fn test_ping_with_args() {
         let pong = b"foo".to_vec();
-        let result = ping(vec![Message::bulk(pong.clone())]);
+        let result = ping(vec![Message::bulk(pong.clone())], &Mutex::new(HashMap::new()));
         assert_eq!(result, Message::simple(str::from_utf8(&pong).expect("Invalid UTF-8")));
     }
 
     #[test]
     fn test_ping_protocol_error() {
-        let result = ping(vec![Message::simple("foo")]);
+        let result = ping(vec![Message::simple("foo")], &Mutex::new(HashMap::new()));
         assert_eq!(result, Message::error("Protocol error: expected Bulk string"));
     }
 
@@ -91,11 +98,16 @@ mod tests {
     fn test_set() {
         let key = b"foo".to_vec();
         let value = b"bar".into();
-        let result = set(vec![Message::bulk(key.clone()),Message::bulk(value)]);
-        let sets = SETS.lock().unwrap();
-        let in_set = sets.get(&key);
+        let sets = Mutex::new(HashMap::new());
+        let result = set(vec![Message::bulk(key.clone()),Message::bulk(value)], &sets);
+        let in_set = {
+            let guard = sets.lock().unwrap();
+            guard.get(&key).cloned()
+        };
         assert_eq!(result, Message::simple("OK"));
-        assert_eq!(in_set, Some(b"bar".to_vec()).as_ref());
+        assert_eq!(in_set, Some(b"bar".to_vec()));
+
+        sets.lock().unwrap().remove(&key);
     }
 
     #[test]
@@ -103,8 +115,26 @@ mod tests {
         let result = set(
             vec![Message::bulk(b"foo".into()),
                  Message::bulk(b"bar".into()),
-                 Message::bulk(b"baz".into())]);
+                 Message::bulk(b"baz".into())], &Mutex::new(HashMap::new()));
         assert_eq!(result, Message::error("ERR wrong number of arguments for 'set' command"));
     }
-}
 
+
+    #[test]
+    fn test_get() {
+        let key = b"foo".to_vec();
+        let value = b"bar".to_vec();
+        let sets = Mutex::new(HashMap::new());
+        {
+            sets.lock().unwrap().insert(key.clone(), value.clone());
+        }
+        let result = get(vec![Message::bulk(key.clone())], &sets);
+        let in_set = {
+            let guard = sets.lock().unwrap();
+            guard.get(&key).cloned()
+        };
+        assert_eq!(result, Message::bulk(in_set.unwrap().clone()));
+
+        sets.lock().unwrap().remove(&key);
+    }
+}

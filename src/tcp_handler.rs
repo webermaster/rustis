@@ -1,16 +1,22 @@
-use std::io::{ Read, Write };
+use std::io::{ ErrorKind ,Read, Write };
 
-use crate::handlers::HANDLERS;
+use crate::aof::Aof;
+use crate::handlers::{HANDLERS, SETS};
 use crate::message::Message::*;
 use crate::message::Message;
 use crate::resp::Resp;
 
 pub fn handle_client<R: Read + Write>(stream: R) {
     let mut resp = Resp::new(stream);
+    let mut aof = Aof::new("database.aof");
     loop {
         let read = resp.read();
         let msg = match read {
             Ok(r) => r,
+            Err(ref e) if e.kind() == ErrorKind::InvalidInput && e.to_string().contains("no bytes") => {
+                println!("Client disconnected");
+                break;
+            },
             Err(err) => {
                 println!("error reading from client: {err}");
                 break;
@@ -28,12 +34,17 @@ pub fn handle_client<R: Read + Write>(stream: R) {
                     let args = &array[1..];
 
                     match HANDLERS.get(cmd.as_str()) {
-                        Some(f) => {
-                            let result_msg = f(args.to_vec());
+                        Some(handler_fn) => {
+
+                            if cmd == "SET" || cmd == "HSET" {
+                                 let _ = aof.write_message(&msg);
+                            }
+
+                            let result_msg = handler_fn(args.to_vec(), &*SETS);
                             _ = resp.write(result_msg);
                         },
                         None => {
-                            _ = resp.write(Message::simple(""));
+                            _ = resp.write(Message::simple("Invalid command: {cmd}"));
                             continue;
                         }
                     }
