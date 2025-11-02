@@ -1,22 +1,46 @@
+use std::boxed::Box;
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 
 use crate::message::Message;
 use crate::message::Message::*;
 
-type SetMap = Mutex<HashMap<Vec<u8>, Vec<u8>>>;
-type HandlerFunc = fn(Vec<Message>, &SetMap) -> Message;
+pub type HandlerFunc = Box<dyn Handler + Sync + Send>;
+
+type MapMutex<K, V> = Mutex<HashMap<K, V>>;
+type SetMap = MapMutex<Vec<u8>, Vec<u8>>;
+type HSetMap = MapMutex<Vec<u8>, HashMap<Vec<u8>, Vec<u8>>>;
 type HandlerMap = LazyLock<HashMap<&'static str, HandlerFunc>>;
 
+pub trait Handler {
+    fn call(&self, args: Vec<Message>) -> Message;
+}
+
+impl<F> Handler for F
+where
+    F: Fn(Vec<Message>) -> Message + Send + Sync + 'static,
+{
+    fn call(&self, args: Vec<Message>) -> Message {
+        (self)(args)
+    }
+}
+
+
 pub static HANDLERS: HandlerMap = LazyLock::new(|| {
-    let mut m: HashMap<&'static str, HandlerFunc> = HashMap::new();
-    m.insert("GET", get);
-    m.insert("PING", ping);
-    m.insert("SET", set);
+   let mut m: HashMap<&'static str, HandlerFunc> = HashMap::new();
+    m.insert("GET", Box::new(|args| get(args, &SETS)));
+    m.insert("HGET", Box::new(|args| hget(args, &HSETS)));
+    m.insert("PING", Box::new(|args| ping(args, &SETS)));
+    m.insert("SET", Box::new(|args| set(args, &SETS)));
+    m.insert("HSET", Box::new(|args| hset(args, &HSETS)));
     m
 });
 
 pub static SETS: LazyLock<SetMap> = LazyLock::new(|| {
+    Mutex::new(HashMap::new())
+});
+
+pub static HSETS: LazyLock<HSetMap> = LazyLock::new(|| {
     Mutex::new(HashMap::new())
 });
 
@@ -39,6 +63,10 @@ pub fn set(args: Vec<Message>, sets: &SetMap) -> Message {
     }
 }
 
+pub fn hset(_args: Vec<Message>, _sets: &HSetMap) -> Message {
+    todo!()
+}
+
 pub fn get(args: Vec<Message>, sets: &SetMap) -> Message {
     match args.as_slice() {
         [Bulk(key)] => {
@@ -54,6 +82,10 @@ pub fn get(args: Vec<Message>, sets: &SetMap) -> Message {
         },
         _ => Message::error("ERR wrong number of arguments for 'get' command")
     }
+}
+
+pub fn hget(_args: Vec<Message>, _sets: &HSetMap) -> Message {
+    todo!()
 }
 
 #[cfg(test)]

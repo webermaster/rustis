@@ -1,69 +1,94 @@
-use std::io::{ ErrorKind ,Read, Write };
+use std::io::{ ErrorKind, Read, Write };
 
-use crate::aof::Aof;
-use crate::handlers::{HANDLERS, SETS};
+use crate::aof::{ Aof };
+use crate::handlers::{HANDLERS, HandlerFunc};
 use crate::message::Message::*;
 use crate::message::Message;
 use crate::resp::Resp;
 
-pub fn handle_client<R: Read + Write>(stream: R) {
-    let mut resp = Resp::new(stream);
-    let mut aof = Aof::new("database.aof");
-    loop {
-        let read = resp.read();
-        let msg = match read {
-            Ok(r) => r,
-            Err(ref e) if e.kind() == ErrorKind::InvalidInput && e.to_string().contains("no bytes") => {
-                println!("Client disconnected");
-                break;
-            },
-            Err(err) => {
-                println!("error reading from client: {err}");
-                break;
+pub fn callback(msg: Message) {
+    if let Array(array) = &msg {
+        if let Bulk(command) = &array[0] {
+            if let Ok(cmd_str) = std::str::from_utf8(command) {
+                let cmd = cmd_str.to_uppercase();
+                let args = &array[1..];
+
+                HANDLERS.get(cmd.as_str()).map(move |handler: &HandlerFunc|{
+                    handler.call(args.to_vec());
+                });
             }
-        };
-
-        if let Array(array) = &msg {
-            if array.is_empty() {
-                println!("Invalid request, expected array length > 0");
-                continue;
-            }
-            if let Bulk(command) = &array[0] {
-                if let Ok(cmd_str) = std::str::from_utf8(command) {
-                    let cmd = cmd_str.to_uppercase();
-                    let args = &array[1..];
-
-                    match HANDLERS.get(cmd.as_str()) {
-                        Some(handler_fn) => {
-
-                            if cmd == "SET" || cmd == "HSET" {
-                                 let _ = aof.write_message(&msg);
-                            }
-
-                            let result_msg = handler_fn(args.to_vec(), &*SETS);
-                            _ = resp.write(result_msg);
-                        },
-                        None => {
-                            _ = resp.write(Message::simple("Invalid command: {cmd}"));
-                            continue;
-                        }
-                    }
-                } else {
-                    _ = resp.write(Message::error("Commands must be valid UTF-8"));
-                    continue;
-                }
-            }
-        } else {
-            _ = resp.write(Message::error("Protocol error: expected '*'"));
-            continue;
         }
     }
 }
 
+pub struct TcpHandler {
+    aof: Aof
+}
+
+impl TcpHandler {
+    pub fn new(aof: Aof) -> Self {
+        TcpHandler{aof}
+    }
+
+    pub fn handle_client<R: Read + Write>(&mut self, stream: R) {
+        let mut resp = Resp::new(stream);
+
+        loop {
+            let read = resp.read();
+            let msg = match read {
+                Ok(r) => r,
+                Err(ref e) if e.kind() == ErrorKind::InvalidInput && e.to_string().contains("no bytes") => {
+                    println!("Client disconnected");
+                    break;
+                },
+                Err(err) => {
+                    println!("error reading from client: {err}");
+                    break;
+                }
+            };
+
+            if let Array(array) = &msg {
+                if array.is_empty() {
+                    println!("Invalid request, expected array length > 0");
+                    continue;
+                }
+                if let Bulk(command) = &array[0] {
+                    if let Ok(cmd_str) = std::str::from_utf8(command) {
+                        let cmd = cmd_str.to_uppercase();
+                        let args = &array[1..];
+
+                        match HANDLERS.get(cmd.as_str()) {
+                            Some(handler) => {
+
+                                if cmd == "SET" || cmd == "HSET" {
+                                     let _ = self.aof.write_message(&msg);
+                                }
+
+                                let result_msg = handler.call(args.to_vec());
+                                _ = resp.write(result_msg);
+                            },
+                            None => {
+                                _ = resp.write(Message::simple(format!("Invalid command: {}", cmd)));
+                                continue;
+                            }
+                        }
+                    } else {
+                        _ = resp.write(Message::error("Commands must be valid UTF-8"));
+                        continue;
+                    }
+                }
+            } else {
+                _ = resp.write(Message::error("Protocol error: expected '*'"));
+                continue;
+            }
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs::File;
     use std::io::{self, Read, Write};
 
     /// A mock stream to simulate client-server communication.
@@ -113,8 +138,11 @@ mod tests {
         // Simulate a PING command: *1\r\n$4\r\nPING\r\n
         let input = b"*1\r\n$4\r\nPING\r\n".to_vec();
         let mut mock_stream = MockStream::new(input);
+        let dev_null = File::open("/dev/null").unwrap();
+        let aof = Aof::new(dev_null);
+        let mut tcp = TcpHandler::new(aof);
 
-        handle_client(&mut mock_stream);
+        tcp.handle_client(&mut mock_stream);
 
         // The expected response is: +PONG\r\n
         let expected_output = b"+PONG\r\n";
@@ -126,11 +154,14 @@ mod tests {
         // Simulate an invalid command: *1\r\n$7\r\nUNKNOWN\r\n
         let input = b"*1\r\n$7\r\nUNKNOWN\r\n".to_vec();
         let mut mock_stream = MockStream::new(input);
+        let dev_null = File::open("/dev/null").unwrap();
+        let aof = Aof::new(dev_null);
+        let mut tcp = TcpHandler::new(aof);
 
-        handle_client(&mut mock_stream);
+        tcp.handle_client(&mut mock_stream);
 
         // The expected response is an empty string: +\r\n
-        let expected_output = b"+\r\n";
+        let expected_output = b"+Invalid command: UNKNOWN\r\n";
         assert_eq!(&mock_stream.write_data, expected_output);
     }
 
@@ -139,8 +170,11 @@ mod tests {
         // Simulate a malformed message: $5\r\nhello\r\n
         let input = b"$5\r\nhello\r\n".to_vec();
         let mut mock_stream = MockStream::new(input);
+        let dev_null = File::open("/dev/null").unwrap();
+        let aof = Aof::new(dev_null);
+        let mut tcp = TcpHandler::new(aof);
 
-        handle_client(&mut mock_stream);
+        tcp.handle_client(&mut mock_stream);
 
         // The expected response is an empty string: +\r\n
         let expected_output = b"-Protocol error: expected '*'\r\n";
@@ -152,8 +186,11 @@ mod tests {
         // Simulate a malformed message: $5\r\nhello\r\n
         let input = b"*1\r\n$1\r\n\xFF\r\n".to_vec();
         let mut mock_stream = MockStream::new(input);
+        let dev_null = File::open("/dev/null").unwrap();
+        let aof = Aof::new(dev_null);
+        let mut tcp = TcpHandler::new(aof);
 
-        handle_client(&mut mock_stream);
+        tcp.handle_client(&mut mock_stream);
 
         // The expected response is an empty string: +\r\n
         let expected_output = b"-Commands must be valid UTF-8\r\n";
