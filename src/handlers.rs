@@ -30,6 +30,7 @@ pub static HANDLERS: HandlerMap = LazyLock::new(|| {
    let mut m: HashMap<&'static str, HandlerFunc> = HashMap::new();
     m.insert("GET", Box::new(|args| get(args, &SETS)));
     m.insert("HGET", Box::new(|args| hget(args, &HSETS)));
+    m.insert("HGETALL", Box::new(|args| hgetall(args, &HSETS)));
     m.insert("PING", Box::new(|args| ping(args, &SETS)));
     m.insert("SET", Box::new(|args| set(args, &SETS)));
     m.insert("HSET", Box::new(|args| hset(args, &HSETS)));
@@ -116,6 +117,27 @@ pub fn hget(args: Vec<Message>, hsets: &HSetMap) -> Message {
             }
         },
         _ => Message::error("ERR wrong number of arguments for 'hget' command")
+    }
+}
+
+pub fn hgetall(args: Vec<Message>, hsets: &HSetMap) -> Message {
+    match args.as_slice() {
+        [Bulk(hash_key)] => {
+            let hsets = hsets.lock().unwrap();
+            match hsets.get(&hash_key.clone()) {
+                Some(hash) => {
+                    Message::Array(hash
+                        .iter()
+                        .flat_map(|(key, value)| vec![Message::Bulk(key.to_vec()),
+                                                      Message::Bulk(value.to_vec())])
+                        .collect::<Vec<Message>>())
+                },
+                _ => {
+                    Message::Null
+                }
+            }
+        },
+        _ => Message::error("ERR wrong number of arguments for 'hgetall' command")
     }
 }
 
@@ -290,5 +312,40 @@ mod tests {
                  Message::bulk(b"baz".into()),
                  Message::bulk(b"bar".into())], &Mutex::new(HashMap::new()));
         assert_eq!(result, Message::error("ERR wrong number of arguments for 'hget' command"));
+    }
+
+    #[test]
+    fn test_hgetall() {
+        let hash_key = b"baz".to_vec();
+        let entries = vec![(b"foo".to_vec(), b"bar".to_vec()),
+                           (b"quax".to_vec(), b"quoo".to_vec())];
+        let hsets: Mutex<HashMap<Vec<u8>, HashMap<Vec<u8>, Vec<u8>>>> = Mutex::new(HashMap::new());
+        let mut set: HashMap<Vec<u8>, Vec<u8>> = HashMap::new();
+        for (k, v) in entries.into_iter() {
+            set.insert(k.clone(), v.clone());
+        }
+        {
+            hsets.lock().unwrap().insert(hash_key.clone(), set);
+        }
+        let result = hgetall(vec![Message::bulk(hash_key.clone())], &hsets);
+        let expected = {
+            Message::Array(hsets.lock()
+            .unwrap()
+            .get(&hash_key)
+            .unwrap()
+            .iter()
+            .flat_map(|(key, value)| vec![Message::Bulk(key.to_vec()),
+                                          Message::Bulk(value.to_vec())])
+            .collect::<Vec<Message>>())
+        };
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_hgetall_too_many_args() {
+        let result = hgetall(
+            vec![Message::bulk(b"foo".into()),
+                 Message::bulk(b"bar".into())], &Mutex::new(HashMap::new()));
+        assert_eq!(result, Message::error("ERR wrong number of arguments for 'hgetall' command"));
     }
 }
