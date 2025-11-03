@@ -63,8 +63,19 @@ pub fn set(args: Vec<Message>, sets: &SetMap) -> Message {
     }
 }
 
-pub fn hset(_args: Vec<Message>, _sets: &HSetMap) -> Message {
-    todo!()
+pub fn hset(args: Vec<Message>, hsets: &HSetMap) -> Message {
+    match args.as_slice() {
+        [Bulk(hash_key), Bulk(key), Bulk(value)] => {
+           let mut hsets = hsets.lock().unwrap();
+            if let None = hsets.get(&hash_key.to_vec()) {
+                hsets.insert(hash_key.to_vec(), HashMap::new());
+            }
+            let hset = hsets.entry(hash_key.to_vec()).or_insert_with(HashMap::new);
+            hset.insert(key.to_vec(), value.to_vec());
+            Message::simple("OK")
+        },
+        _ => Message::error("ERR wrong number of arguments for 'hset' command")
+    }
 }
 
 pub fn get(args: Vec<Message>, sets: &SetMap) -> Message {
@@ -84,8 +95,28 @@ pub fn get(args: Vec<Message>, sets: &SetMap) -> Message {
     }
 }
 
-pub fn hget(_args: Vec<Message>, _sets: &HSetMap) -> Message {
-    todo!()
+pub fn hget(args: Vec<Message>, hsets: &HSetMap) -> Message {
+    match args.as_slice() {
+        [Bulk(hash_key), Bulk(key)] => {
+            let hsets = hsets.lock().unwrap();
+            match hsets.get(&hash_key.to_vec()) {
+                Some(hash) => {
+                    match hash.get(&key.to_vec()) {
+                        Some(value) => {
+                            Message::bulk(value.to_vec())
+                        },
+                        _ => {
+                            Message::Null
+                        }
+                    }
+                },
+                _ => {
+                    Message::Null
+                }
+            }
+        },
+        _ => Message::error("ERR wrong number of arguments for 'hget' command")
+    }
 }
 
 #[cfg(test)]
@@ -105,6 +136,16 @@ mod tests {
     #[test]
     fn test_init_handler_funcs_contains_get() {
         assert!((*HANDLERS).contains_key("GET"));
+    }
+
+    #[test]
+    fn test_init_handler_funcs_contains_hset() {
+        assert!((*HANDLERS).contains_key("HSET"));
+    }
+
+    #[test]
+    fn test_init_handler_funcs_contains_hget() {
+        assert!((*HANDLERS).contains_key("HGET"));
     }
 
     #[test]
@@ -166,7 +207,88 @@ mod tests {
             guard.get(&key).cloned()
         };
         assert_eq!(result, Message::bulk(in_set.unwrap().clone()));
+    }
 
-        sets.lock().unwrap().remove(&key);
+    #[test]
+    fn test_get_too_many_args() {
+        let result = get(
+            vec![Message::bulk(b"foo".into()),
+                 Message::bulk(b"bar".into())], &Mutex::new(HashMap::new()));
+        assert_eq!(result, Message::error("ERR wrong number of arguments for 'get' command"));
+    }
+
+    #[test]
+    fn test_hset() {
+        let hash_key = b"baz".to_vec();
+        let key = b"foo".to_vec();
+        let value = b"bar".into();
+        let hsets = Mutex::new(HashMap::new());
+        let result = hset(vec![Message::bulk(hash_key.clone()),
+                               Message::bulk(key.clone()),
+                               Message::bulk(value)], &hsets);
+        let in_set = {
+            let guard = hsets.lock().unwrap();
+            guard.get(&hash_key).unwrap().get(&key).cloned()
+        };
+        assert_eq!(result, Message::simple("OK"));
+        assert_eq!(in_set, Some(b"bar".to_vec()));
+    }
+
+    #[test]
+    fn test_hset_reset() {
+        let hash_key = b"baz".to_vec();
+        let key = b"foo".to_vec();
+        let value = b"bar".to_vec();
+        let hsets: Mutex<HashMap<Vec<u8>, HashMap<Vec<u8>, Vec<u8>>>> = Mutex::new(HashMap::new());
+        let mut set: HashMap<Vec<u8>, Vec<u8>> = HashMap::new();
+        set.insert(key.clone(), b"quax".to_vec());
+        {
+            hsets.lock().unwrap().insert(hash_key.clone(), set);
+        }
+        let result = hset(vec![Message::bulk(hash_key.clone()), Message::bulk(key.clone()), Message::bulk(value)], &hsets);
+        let in_set = {
+            let guard = hsets.lock().unwrap();
+            guard.get(&hash_key).unwrap().get(&key).cloned()
+        };
+        assert_eq!(result, Message::simple("OK"));
+        assert_eq!(in_set, Some(b"bar".to_vec()));
+    }
+
+    #[test]
+    fn test_hset_too_many_args() {
+        let result = hset(
+            vec![Message::bulk(b"foo".into()),
+                 Message::bulk(b"bar".into()),
+                 Message::bulk(b"quax".into()),
+                 Message::bulk(b"baz".into())], &Mutex::new(HashMap::new()));
+        assert_eq!(result, Message::error("ERR wrong number of arguments for 'hset' command"));
+    }
+
+
+    #[test]
+    fn test_hget() {
+        let hash_key = b"baz".to_vec();
+        let key = b"foo".to_vec();
+        let value = b"bar".to_vec();
+        let hsets: Mutex<HashMap<Vec<u8>, HashMap<Vec<u8>, Vec<u8>>>> = Mutex::new(HashMap::new());
+        let mut set: HashMap<Vec<u8>, Vec<u8>> = HashMap::new();
+        set.insert(key.clone(), value.clone());
+        {
+            hsets.lock().unwrap().insert(hash_key.clone(), set);
+        }
+        let result = hget(vec![Message::bulk(hash_key.clone()), Message::bulk(key.clone())], &hsets);
+        let in_set = {
+            hsets.lock().unwrap().get(&hash_key).unwrap().get(&key).cloned()
+        };
+        assert_eq!(result, Message::bulk(in_set.unwrap().clone()));
+    }
+
+    #[test]
+    fn test_hget_too_many_args() {
+        let result = hget(
+            vec![Message::bulk(b"foo".into()),
+                 Message::bulk(b"baz".into()),
+                 Message::bulk(b"bar".into())], &Mutex::new(HashMap::new()));
+        assert_eq!(result, Message::error("ERR wrong number of arguments for 'hget' command"));
     }
 }
