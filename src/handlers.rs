@@ -56,7 +56,7 @@ pub fn set(args: Vec<Message>, sets: &SetMap) -> Message {
     match args.as_slice() {
         [Bulk(key), Bulk(value)] => {
            let mut sets = sets.lock().unwrap();
-            sets.insert(key.to_vec(), value.to_vec());
+            sets.insert(key.clone(), value.clone());
             Message::simple("OK")
         },
         _ => Message::error("ERR wrong number of arguments for 'set' command")
@@ -67,11 +67,11 @@ pub fn hset(args: Vec<Message>, hsets: &HSetMap) -> Message {
     match args.as_slice() {
         [Bulk(hash_key), Bulk(key), Bulk(value)] => {
            let mut hsets = hsets.lock().unwrap();
-            if let None = hsets.get(&hash_key.to_vec()) {
+            if let None = hsets.get(&hash_key.clone()) {
                 hsets.insert(hash_key.to_vec(), HashMap::new());
             }
-            let hset = hsets.entry(hash_key.to_vec()).or_insert_with(HashMap::new);
-            hset.insert(key.to_vec(), value.to_vec());
+            let hset = hsets.entry(hash_key.clone()).or_insert_with(HashMap::new);
+            hset.insert(key.to_vec(), value.clone());
             Message::simple("OK")
         },
         _ => Message::error("ERR wrong number of arguments for 'hset' command")
@@ -82,9 +82,9 @@ pub fn get(args: Vec<Message>, sets: &SetMap) -> Message {
     match args.as_slice() {
         [Bulk(key)] => {
             let sets = sets.lock().unwrap();
-            match sets.get(&key.to_vec()) {
+            match sets.get(&key.clone()) {
                 Some(value) => {
-                    Message::bulk(value.to_vec())
+                    Message::bulk(value.clone())
                 },
                 _ => {
                     Message::Null
@@ -99,11 +99,11 @@ pub fn hget(args: Vec<Message>, hsets: &HSetMap) -> Message {
     match args.as_slice() {
         [Bulk(hash_key), Bulk(key)] => {
             let hsets = hsets.lock().unwrap();
-            match hsets.get(&hash_key.to_vec()) {
+            match hsets.get(&hash_key.clone()) {
                 Some(hash) => {
-                    match hash.get(&key.to_vec()) {
+                    match hash.get(&key.clone()) {
                         Some(value) => {
-                            Message::bulk(value.to_vec())
+                            Message::bulk(value.clone())
                         },
                         _ => {
                             Message::Null
