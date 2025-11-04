@@ -1,9 +1,8 @@
-
 use std::fs::File;
 use std::io::{self, Write};
 use std::sync::mpsc::{channel, Sender};
-use std::time::Duration;
 use std::thread::{sleep, spawn};
+use std::time::Duration;
 
 use crate::message::Message;
 use crate::resp::Resp;
@@ -12,23 +11,21 @@ pub type CB = fn(msg: Message);
 
 pub struct Aof {
     file: File,
-    sender: Sender<()>
+    sender: Sender<()>,
 }
 
 impl Aof {
     pub fn new(file: File) -> Self {
         let (sender, receiver) = channel();
-        let aof = Aof{file, sender};
+        let aof = Aof { file, sender };
         let cloned = aof.file.try_clone().unwrap();
-        spawn(move || {
-            loop {
-                if receiver.try_recv().is_ok() {
-                    println!("Thread received termination signal. Exiting....");
-                    break;
-                }
-                let _ = cloned.sync_all();
-                sleep(Duration::from_secs(1));
+        spawn(move || loop {
+            if receiver.try_recv().is_ok() {
+                println!("Thread received termination signal. Exiting....");
+                break;
             }
+            let _ = cloned.sync_all();
+            sleep(Duration::from_secs(1));
         });
         aof
     }
@@ -63,7 +60,7 @@ impl Write for Aof {
     fn flush(&mut self) -> Result<(), io::Error> {
         match self.sender.send(()) {
             Ok(a) => Ok(a),
-            Err(msg) => Err(io::Error::other(msg))
+            Err(msg) => Err(io::Error::other(msg)),
         }
     }
 
@@ -73,5 +70,4 @@ impl Write for Aof {
 }
 
 #[cfg(test)]
-mod test {
-}
+mod test {}

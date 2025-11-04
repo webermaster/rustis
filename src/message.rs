@@ -1,4 +1,3 @@
-
 #[derive(Clone, Debug, PartialEq)]
 pub enum Message {
     Simple(String),
@@ -10,7 +9,6 @@ pub enum Message {
 }
 
 impl Message {
-
     pub fn simple<S: Into<String>>(s: S) -> Self {
         Message::Simple(s.into())
     }
@@ -121,9 +119,8 @@ mod tests {
     fn test_marshal_array() {
         let msg = Message::array(vec![
             Message::bulk("foo".into()),
-            Message::bulk("bar".into())
+            Message::bulk("bar".into()),
         ]);
         assert_eq!(msg.marshal(), b"*2\r\n$3\r\nfoo\r\n$3\r\nbar\r\n");
     }
 }
-

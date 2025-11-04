@@ -4,28 +4,26 @@ use crate::message::Message;
 use crate::message::Message::*;
 
 pub struct Resp<R> {
-    rw: R
+    rw: R,
 }
 
-impl <R: Read + Write> Resp<R> {
+impl<R: Read + Write> Resp<R> {
     pub fn new(rw: R) -> Resp<R> {
-        Resp{rw}
+        Resp { rw }
     }
 
     pub fn read(&mut self) -> Result<Message> {
         let read_result = self.read_byte();
         match read_result {
-            Ok(b) => {
-                match b {
-                    b'*' => self.read_array(),
-                    b'$' => self.read_bulk(),
-                    t => {
-                        println!("Unknown type: {}", String::from_utf8_lossy(&[t]));
-                        Ok(Null)
-                    }
+            Ok(b) => match b {
+                b'*' => self.read_array(),
+                b'$' => self.read_bulk(),
+                t => {
+                    println!("Unknown type: {}", String::from_utf8_lossy(&[t]));
+                    Ok(Null)
                 }
             },
-            Err(err) => Err(err)
+            Err(err) => Err(err),
         }
     }
 
@@ -39,10 +37,8 @@ impl <R: Read + Write> Resp<R> {
 
         match self.rw.read(&mut buf) {
             Ok(0) => Err(Error::new(ErrorKind::InvalidInput, "no bytes")),
-            Ok(_) => {
-                Ok(buf[0])
-            },
-            Err(err)  => Err(err)
+            Ok(_) => Ok(buf[0]),
+            Err(err) => Err(err),
         }
     }
 
@@ -53,7 +49,7 @@ impl <R: Read + Write> Resp<R> {
         for _ in 0..array_length {
             let val = match self.read() {
                 Ok(msg) => msg,
-                Err(error) => Message::error(error.to_string())
+                Err(error) => Message::error(error.to_string()),
             };
             array.push(val);
         }
@@ -72,15 +68,16 @@ impl <R: Read + Write> Resp<R> {
 
     fn read_integer(&mut self) -> (usize, Result<usize>) {
         let mut buf = vec![];
-        let n = match self.read_line(&mut buf){
+        let n = match self.read_line(&mut buf) {
             Ok(n) => n,
-            Err(err) => return (0, Err(err))
+            Err(err) => return (0, Err(err)),
         };
         let result = String::from_utf8(buf)
             .map_err(|_| Error::new(ErrorKind::InvalidData, "invalid UTF-8 in integer"))
-            .and_then(|s| s.parse::<usize>()
-                .map_err(|_| Error::new(ErrorKind::InvalidData, "invalid integer"))
-            );
+            .and_then(|s| {
+                s.parse::<usize>()
+                    .map_err(|_| Error::new(ErrorKind::InvalidData, "invalid integer"))
+            });
 
         (n, result)
     }
@@ -92,10 +89,10 @@ impl <R: Read + Write> Resp<R> {
             n += 1;
             buf.append(&mut vec![c]);
             if buf.len() >= 2 && buf[buf.len() - 2] == b'\r' {
-                break
+                break;
             }
         }
-        buf.truncate(n-2);
+        buf.truncate(n - 2);
         Ok(n)
     }
 }
@@ -162,4 +159,3 @@ mod tests {
         assert!(result.is_err());
     }
 }
-

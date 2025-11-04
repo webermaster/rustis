@@ -1,9 +1,9 @@
-use std::io::{ ErrorKind, Read, Write };
+use std::io::{ErrorKind, Read, Write};
 
-use crate::aof::{ Aof };
-use crate::handlers::{ HANDLERS };
-use crate::message::Message::*;
+use crate::aof::Aof;
+use crate::handlers::HANDLERS;
 use crate::message::Message;
+use crate::message::Message::*;
 use crate::resp::Resp;
 
 pub fn callback(msg: Message) {
@@ -21,7 +21,6 @@ pub fn callback(msg: Message) {
     }
 }
 
-
 pub fn handle_client<R: Read + Write>(aof: &mut Aof, stream: R) {
     let mut resp = Resp::new(stream);
 
@@ -29,10 +28,12 @@ pub fn handle_client<R: Read + Write>(aof: &mut Aof, stream: R) {
         let read = resp.read();
         let msg = match read {
             Ok(r) => r,
-            Err(ref e) if e.kind() == ErrorKind::InvalidInput && e.to_string().contains("no bytes") => {
+            Err(ref e)
+                if e.kind() == ErrorKind::InvalidInput && e.to_string().contains("no bytes") =>
+            {
                 println!("Client disconnected");
                 break;
-            },
+            }
             Err(err) => {
                 println!("error reading from client: {err}");
                 break;
@@ -51,14 +52,13 @@ pub fn handle_client<R: Read + Write>(aof: &mut Aof, stream: R) {
 
                     match HANDLERS.get(cmd.as_str()) {
                         Some(handler) => {
-
                             if cmd == "SET" || cmd == "HSET" {
-                                 let _ = aof.write_message(&msg);
+                                let _ = aof.write_message(&msg);
                             }
 
                             let result_msg = handler.call(args.to_vec());
                             _ = resp.write(result_msg);
-                        },
+                        }
                         None => {
                             _ = resp.write(Message::simple(format!("Invalid command: {}", cmd)));
                             continue;
@@ -188,4 +188,3 @@ mod tests {
         assert_eq!(&mock_stream.write_data, expected_output);
     }
 }
-
