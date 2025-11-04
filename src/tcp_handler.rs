@@ -1,7 +1,7 @@
 use std::io::{ ErrorKind, Read, Write };
 
 use crate::aof::{ Aof };
-use crate::handlers::{HANDLERS, HandlerFunc};
+use crate::handlers::{ HANDLERS };
 use crate::message::Message::*;
 use crate::message::Message;
 use crate::resp::Resp;
@@ -13,9 +13,9 @@ pub fn callback(msg: Message) {
                 let cmd = cmd_str.to_uppercase();
                 let args = &array[1..];
 
-                HANDLERS.get(cmd.as_str()).map(move |handler: &HandlerFunc|{
+                if let Some(handler) = HANDLERS.get(cmd.as_str()) {
                     handler.call(args.to_vec());
-                });
+                }
             }
         }
     }

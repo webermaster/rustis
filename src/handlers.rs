@@ -67,11 +67,11 @@ pub fn set(args: Vec<Message>, sets: &SetMap) -> Message {
 pub fn hset(args: Vec<Message>, hsets: &HSetMap) -> Message {
     match args.as_slice() {
         [Bulk(hash_key), Bulk(key), Bulk(value)] => {
-           let mut hsets = hsets.lock().unwrap();
-            if let None = hsets.get(&hash_key.clone()) {
+            let mut hsets = hsets.lock().unwrap();
+            if hsets.get(&hash_key.clone()).is_none() {
                 hsets.insert(hash_key.to_vec(), HashMap::new());
             }
-            let hset = hsets.entry(hash_key.clone()).or_insert_with(HashMap::new);
+            let hset = hsets.entry(hash_key.clone()).or_default();
             hset.insert(key.to_vec(), value.clone());
             Message::simple("OK")
         },

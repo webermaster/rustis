@@ -22,9 +22,9 @@ impl Aof {
         let cloned = aof.file.try_clone().unwrap();
         spawn(move || {
             loop {
-                if let Ok(_) = receiver.try_recv() {
+                if receiver.try_recv().is_ok() {
                     println!("Thread received termination signal. Exiting....");
-                    break; // Exit the loop
+                    break;
                 }
                 let _ = cloned.sync_all();
                 sleep(Duration::from_secs(1));
@@ -63,7 +63,7 @@ impl Write for Aof {
     fn flush(&mut self) -> Result<(), io::Error> {
         match self.sender.send(()) {
             Ok(a) => Ok(a),
-            Err(msg) => Err(io::Error::new(io::ErrorKind::Other, msg))
+            Err(msg) => Err(io::Error::other(msg))
         }
     }
 
